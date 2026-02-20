@@ -62,18 +62,33 @@ export async function POST(req: NextRequest) {
     let confirmed = 0;
 
     for (const activity of activities) {
-      // Only process incoming ERC-20 transfers of USDC to our wallet
-      if (activity.category !== "erc20") continue;
-      if (activity.rawContract?.address?.toLowerCase() !== USDC_ADDRESS.toLowerCase()) continue;
+      // Only process incoming token transfers of USDC to our wallet
+      // Alchemy uses "token" on Polygon, "erc20" on Ethereum
+      if (activity.category !== "erc20" && activity.category !== "token") continue;
+
+      // Check contract address from rawContract or log
+      const contractAddr =
+        activity.rawContract?.address?.toLowerCase() ||
+        activity.log?.address?.toLowerCase() ||
+        "";
+      if (contractAddr !== USDC_ADDRESS.toLowerCase()) continue;
       if (activity.toAddress?.toLowerCase() !== platformWallet) continue;
 
       const fromAddress = activity.fromAddress?.toLowerCase();
-      const rawValue = activity.rawContract?.rawValue;
+      const rawValue = activity.rawContract?.rawValue || activity.log?.data;
       if (!fromAddress || !rawValue) continue;
 
-      // Convert raw hex value to human amount
-      const amountBigInt = BigInt(rawValue);
-      const amount = Number(amountBigInt) / Math.pow(10, USDC_DECIMALS);
+      // Convert raw value to human amount
+      // rawValue can be hex string or the "value" field might already be a number
+      let amount: number;
+      try {
+        const amountBigInt = BigInt(rawValue);
+        amount = Number(amountBigInt) / Math.pow(10, USDC_DECIMALS);
+      } catch {
+        // Fallback: Alchemy sometimes provides a numeric "value" field directly
+        amount = Number(activity.value) || 0;
+      }
+      if (amount <= 0) continue;
 
       const txHash = activity.hash || null;
 
