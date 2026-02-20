@@ -37,6 +37,17 @@ export default async function DashboardPage() {
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
+  // Check if bot is online (heartbeat within last 30s)
+  const { data: botState } = await supabase
+    .from("bot_state")
+    .select("last_heartbeat")
+    .eq("id", 1)
+    .single();
+
+  const botOnline = botState?.last_heartbeat
+    ? Date.now() - new Date(botState.last_heartbeat).getTime() < 30000
+    : false;
+
   return (
     <DashboardClient
       user={user}
@@ -44,6 +55,7 @@ export default async function DashboardPage() {
       agentActions={agentActions || []}
       deposits={deposits || []}
       withdrawals={withdrawals || []}
+      botOnline={botOnline}
     />
   );
 }

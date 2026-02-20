@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import type { Profile, AgentAction, Deposit, Withdrawal } from "@/lib/types";
+import type { Profile, AgentAction, Deposit, Withdrawal, BotLog } from "@/lib/types";
 import DepositModal from "./deposit-modal";
 import WithdrawModal from "./withdraw-modal";
 
@@ -14,23 +14,16 @@ interface DashboardClientProps {
   agentActions: AgentAction[];
   deposits: Deposit[];
   withdrawals: Withdrawal[];
+  botOnline: boolean;
 }
 
-/* ─── Bot idle messages ─── */
-const SCAN_MESSAGES = [
-  "Scanning 47 active prediction markets...",
-  "Analyzing BTC daily volatility spread",
-  "Monitoring order book depth on Polymarket",
-  "Evaluating YES/NO price divergence",
-  "Checking liquidity pool conditions",
-  "No edge detected — holding position",
-  "Recalculating optimal entry size",
-  "Watching for price movement signals",
-  "Comparing historical spread patterns",
-  "Running volatility capture model v2.4",
-  "BTC prediction market: spread within normal range",
-  "Polling real-time price feeds...",
-];
+function mapLogType(type: string): "scan" | "info" | "trade" | "warn" {
+  const t = type.toUpperCase();
+  if (t === "OPEN" || t === "EXIT" || t === "POOL") return "trade";
+  if (t === "WARN") return "warn";
+  if (t === "STATUS" || t === "AUTO") return "info";
+  return "scan";
+}
 
 export default function DashboardClient({
   user,
@@ -38,6 +31,7 @@ export default function DashboardClient({
   agentActions,
   deposits,
   withdrawals,
+  botOnline,
 }: DashboardClientProps) {
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -50,6 +44,8 @@ export default function DashboardClient({
   const supabase = createClient();
 
   const balance = profile?.balance ?? 0;
+  const lockedInTrade = profile?.locked_in_trade ?? 0;
+  const totalBalance = balance + lockedInTrade;
   const activeAction = agentActions.find((a) => a.status === "active");
   const closedActions = agentActions.filter((a) => a.status === "closed");
   const totalPL = closedActions.reduce(
@@ -78,40 +74,69 @@ export default function DashboardClient({
     document.documentElement.setAttribute("data-theme", next);
   }, [theme]);
 
-  /* ─── Bot log simulation ─── */
+  /* ─── Real bot logs from Supabase ─── */
   useEffect(() => {
-    const now = () =>
-      new Date().toLocaleTimeString("en-US", {
+    const fmtTs = (ts: number) =>
+      new Date(ts).toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
         hour12: false,
       });
 
-    if (balance <= 0) {
-      setBotLogs([
-        { time: now(), msg: "Agent inactive — deposit to activate", type: "warn" },
-      ]);
-      return;
-    }
+    // Load initial logs
+    supabase
+      .from("bot_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setBotLogs(
+            data.map((log: BotLog) => ({
+              time: fmtTs(log.ts),
+              msg: log.message,
+              type: mapLogType(log.type),
+            }))
+          );
+        } else if (!botOnline) {
+          setBotLogs([
+            { time: fmtTs(Date.now()), msg: "Bot offline — waiting for connection", type: "warn" as const },
+          ]);
+        }
+      });
 
-    // Initial batch
-    const initial = Array.from({ length: 5 }, (_, i) => ({
-      time: now(),
-      msg: SCAN_MESSAGES[i % SCAN_MESSAGES.length],
-      type: "scan" as const,
-    }));
-    setBotLogs(initial);
+    // Subscribe to new logs in real-time
+    const channel = supabase
+      .channel("bot_logs_realtime")
+      .on(
+        "postgres_changes" as never,
+        { event: "INSERT", schema: "public", table: "bot_logs" },
+        (payload: { new: BotLog }) => {
+          const log = payload.new;
+          setBotLogs((prev) =>
+            [{ time: fmtTs(log.ts), msg: log.message, type: mapLogType(log.type) }, ...prev].slice(0, 50)
+          );
+        }
+      )
+      .subscribe();
 
-    const interval = setInterval(() => {
-      const msg = SCAN_MESSAGES[Math.floor(Math.random() * SCAN_MESSAGES.length)];
-      setBotLogs((prev) =>
-        [{ time: now(), msg, type: "scan" as const }, ...prev].slice(0, 30)
-      );
-    }, 3500);
+    return () => { supabase.removeChannel(channel); };
+  }, [supabase, botOnline]);
 
-    return () => clearInterval(interval);
-  }, [balance]);
+  /* ─── Realtime agent_actions — refresh on trade changes ─── */
+  useEffect(() => {
+    const channel = supabase
+      .channel("agent_actions_realtime")
+      .on(
+        "postgres_changes" as never,
+        { event: "*", schema: "public", table: "agent_actions", filter: `user_id=eq.${user.id}` },
+        () => { router.refresh(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [supabase, user.id, router]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -169,8 +194,8 @@ export default function DashboardClient({
                 width: 6,
                 height: 6,
                 borderRadius: "50%",
-                background: balance > 0 ? "var(--profit)" : "var(--text-gray)",
-                boxShadow: balance > 0 ? "0 0 8px var(--profit)" : "none",
+                background: botOnline ? "var(--profit)" : "var(--text-gray)",
+                boxShadow: botOnline ? "0 0 8px var(--profit)" : "none",
                 display: "inline-block",
               }}
             />
@@ -178,11 +203,11 @@ export default function DashboardClient({
               style={{
                 fontFamily: "var(--font-code)",
                 fontSize: 11,
-                color: balance > 0 ? "var(--profit)" : "var(--text-gray)",
+                color: botOnline ? "var(--profit)" : "var(--text-gray)",
                 letterSpacing: "0.05em",
               }}
             >
-              {balance > 0 ? "AGENT ONLINE" : "AGENT IDLE"}
+              {botOnline ? "BOT ONLINE" : "BOT OFFLINE"}
             </span>
           </div>
 
@@ -347,7 +372,7 @@ export default function DashboardClient({
               Vault Balance
             </div>
             <div
-              className={balance > 0 ? "db-glow-green" : ""}
+              className={totalBalance > 0 ? "db-glow-green" : ""}
               style={{
                 fontSize: 32,
                 fontWeight: 700,
@@ -356,8 +381,18 @@ export default function DashboardClient({
                 color: "var(--text-white)",
               }}
             >
-              ${Number(balance).toFixed(2)}
+              ${Number(totalBalance).toFixed(2)}
             </div>
+            {lockedInTrade > 0 && (
+              <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+                <span style={{ fontSize: 10, fontFamily: "var(--font-code)", color: "var(--profit)" }}>
+                  ${balance.toFixed(2)} available
+                </span>
+                <span style={{ fontSize: 10, fontFamily: "var(--font-code)", color: "var(--active)" }}>
+                  ${lockedInTrade.toFixed(2)} in trade
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="db-stat-card">
@@ -476,8 +511,8 @@ export default function DashboardClient({
                   Agent Terminal
                 </span>
               </div>
-              <span className={`db-badge ${balance > 0 ? "db-badge-green" : "db-badge-gray"}`}>
-                {balance > 0 ? "LIVE" : "OFFLINE"}
+              <span className={`db-badge ${botOnline ? "db-badge-green" : "db-badge-gray"}`}>
+                {botOnline ? "LIVE" : "OFFLINE"}
               </span>
             </div>
             <div className="db-terminal">
@@ -714,9 +749,9 @@ export default function DashboardClient({
                     No active position
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-gray)", opacity: 0.6 }}>
-                    {balance > 0
-                      ? "Agent is scanning for the next opportunity"
-                      : "Deposit to activate your agent"}
+                    {botOnline
+                      ? "Bot is scanning for the next opportunity"
+                      : "Deposit to activate trading"}
                   </div>
                 </div>
               )}

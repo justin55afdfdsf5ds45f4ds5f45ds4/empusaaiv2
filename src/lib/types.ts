@@ -1,6 +1,7 @@
 export interface Profile {
   id: string;
   balance: number;
+  locked_in_trade: number;
   created_at: string;
 }
 
@@ -29,6 +30,7 @@ export interface Withdrawal {
 export interface AgentAction {
   id: string;
   user_id: string;
+  pool_trade_id: string | null;
   market_name: string;
   side: "YES" | "NO";
   entry_price: number;
@@ -39,4 +41,13 @@ export interface AgentAction {
   status: "active" | "closed" | "pending";
   created_at: string;
   closed_at: string | null;
+}
+
+export interface BotLog {
+  id: number;
+  ts: number;
+  type: string;
+  message: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
 }

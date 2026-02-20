@@ -43,6 +43,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, processed: 0, message: "No pending withdrawals" });
   }
 
+  // Check if bot has an active trade (hot wallet funds may be on Polymarket)
+  const { data: activeTrades } = await supabase
+    .from("pool_trades")
+    .select("id")
+    .eq("status", "active")
+    .limit(1);
+
+  const botHasActiveTrade = activeTrades && activeTrades.length > 0;
+
   // Check hot wallet balance before processing
   let hotWalletBalance: number;
   try {
@@ -57,10 +66,14 @@ export async function GET(req: NextRequest) {
   for (const withdrawal of pending) {
     // Skip if hot wallet doesn't have enough
     if (hotWalletBalance < withdrawal.amount) {
-      console.warn(
-        `[withdraw] Insufficient hot wallet balance (${hotWalletBalance}) for withdrawal ${withdrawal.id} (${withdrawal.amount})`
-      );
-      results.push({ id: withdrawal.id, status: "skipped", error: "Insufficient hot wallet balance" });
+      // If bot has active trade, funds might be on Polymarket — defer to next cron run
+      if (botHasActiveTrade) {
+        console.warn(`[withdraw] Deferred — bot has active trade, hot wallet: $${hotWalletBalance.toFixed(2)}, need: $${withdrawal.amount}`);
+        results.push({ id: withdrawal.id, status: "skipped", error: "Deferred — bot has active trade" });
+      } else {
+        console.warn(`[withdraw] Insufficient hot wallet balance (${hotWalletBalance}) for withdrawal ${withdrawal.id} (${withdrawal.amount})`);
+        results.push({ id: withdrawal.id, status: "skipped", error: "Insufficient hot wallet balance" });
+      }
       continue;
     }
 
