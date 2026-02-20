@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendUsdc, getHotWalletUsdcBalance } from "@/lib/polygon";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 /**
  * Withdrawal processor.
  * Called by Vercel Cron (or manually) to process pending withdrawals:
