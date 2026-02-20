@@ -100,8 +100,13 @@ export default function DashboardClient({
             }))
           );
         } else if (!botOnline) {
+          const now = Date.now();
           setBotLogs([
-            { time: fmtTs(Date.now()), msg: "Bot offline — waiting for connection", type: "warn" as const },
+            { time: fmtTs(now), msg: "Bot offline — waiting for connection", type: "warn" as const },
+            { time: fmtTs(now), msg: "Live logs will appear here when bot starts", type: "scan" as const },
+            { time: fmtTs(now), msg: "Bot monitors BTC daily prediction markets on Polymarket", type: "scan" as const },
+            { time: fmtTs(now), msg: "5 WebSocket feeds: Binance, Coinbase, Kraken, Chainlink, CLOB", type: "scan" as const },
+            { time: fmtTs(now), msg: "Signals: momentum, volume, order flow, regime detection", type: "scan" as const },
           ]);
         }
       });
@@ -383,16 +388,14 @@ export default function DashboardClient({
             >
               ${Number(totalBalance).toFixed(2)}
             </div>
-            {lockedInTrade > 0 && (
-              <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-                <span style={{ fontSize: 10, fontFamily: "var(--font-code)", color: "var(--profit)" }}>
-                  ${balance.toFixed(2)} available
-                </span>
-                <span style={{ fontSize: 10, fontFamily: "var(--font-code)", color: "var(--active)" }}>
-                  ${lockedInTrade.toFixed(2)} in trade
-                </span>
-              </div>
-            )}
+            <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-code)", color: "var(--profit)" }}>
+                ${balance.toFixed(2)} available
+              </span>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-code)", color: lockedInTrade > 0 ? "var(--active)" : "var(--text-gray)", opacity: lockedInTrade > 0 ? 1 : 0.5 }}>
+                ${lockedInTrade.toFixed(2)} in trade
+              </span>
+            </div>
           </div>
 
           <div className="db-stat-card">
@@ -528,10 +531,12 @@ export default function DashboardClient({
                           ? "#FFC107"
                           : log.type === "trade"
                           ? "var(--profit)"
+                          : log.type === "info"
+                          ? "var(--active)"
                           : "var(--text-gray)",
                     }}
                   >
-                    {log.type === "warn" ? "! " : log.type === "trade" ? "> " : "  "}
+                    {log.type === "warn" ? "! " : log.type === "trade" ? "> " : log.type === "info" ? "~ " : "  "}
                     {log.msg}
                   </span>
                 </div>
@@ -748,10 +753,17 @@ export default function DashboardClient({
                   <div style={{ fontSize: 14, color: "var(--text-gray)", marginBottom: 4 }}>
                     No active position
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text-gray)", opacity: 0.6 }}>
+                  <div style={{ fontSize: 12, color: "var(--text-gray)", opacity: 0.6, marginBottom: 16 }}>
                     {botOnline
                       ? "Bot is scanning for the next opportunity"
-                      : "Deposit to activate trading"}
+                      : balance > 0
+                      ? "Bot is offline — position will open when bot starts"
+                      : "Deposit USDC to start trading"}
+                  </div>
+                  <div style={{ fontSize: 11, fontFamily: "var(--font-code)", color: "var(--text-gray)", opacity: 0.4, lineHeight: 1.8 }}>
+                    Market: BTC Daily UP/DOWN<br />
+                    Strategy: Momentum + Order Flow<br />
+                    Max Position: 1 at a time
                   </div>
                 </div>
               )}
