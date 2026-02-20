@@ -102,8 +102,8 @@ export async function POST(req: NextRequest) {
         .select("id, amount, user_id")
         .eq("status", "pending")
         .eq("sender_address", fromAddress)
-        .gte("amount", amount - 0.01)
-        .lte("amount", amount + 0.01)
+        .gte("amount", amount - 0.10)
+        .lte("amount", amount + 0.10)
         .order("created_at", { ascending: true })
         .limit(1);
 
